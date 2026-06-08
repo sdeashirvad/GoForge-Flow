@@ -1,8 +1,8 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../api/client'
-import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import StatusBadge from '../components/StatusBadge'
 import JobTypeTag from '../components/JobTypeTag'
 import StatCard from '../components/StatCard'
@@ -38,12 +38,16 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [seeding, setSeeding] = useState(false)
   const [error, setError] = useState(null)
+  const [wsStatus, setWsStatus] = useState('connecting')
+  // eslint-disable-next-line no-unused-vars
+  const filterRef = useRef(filter)
+  filterRef.current = filter
 
-  const refresh = useCallback(async () => {
+  const fetchAll = useCallback(async (f) => {
     try {
       const [s, j] = await Promise.all([
         api.getStats(),
-        api.listJobs(filter ? { status: filter } : {}),
+        api.listJobs(f ? { status: f } : {}),
       ])
       setStats(s)
       setJobs(j.jobs || [])
@@ -53,14 +57,31 @@ export default function Dashboard() {
     } finally {
       setLoading(false)
     }
-  }, [filter])
+  }, [])
 
-  usePolling(refresh, 3000)
+  // Initial load
+  React.useEffect(() => { fetchAll(filter) }, [])
+
+  // Re-fetch when filter changes
+  const handleFilter = (f) => {
+    setFilter(f)
+    fetchAll(f)
+  }
+
+  // WebSocket — react to server-pushed events
+  const handleWsMessage = useCallback((event) => {
+    if (event.type === '_connected') { setWsStatus('connected'); return }
+    if (['job_created', 'job_updated', 'job_deleted', 'jobs_seeded', 'job_diagnosed'].includes(event.type)) {
+      fetchAll(filterRef.current)
+    }
+  }, [fetchAll])
+
+  useWebSocket(handleWsMessage)
 
   const handleSeed = async () => {
     setSeeding(true)
-    try { await api.seedJobs(); await refresh() }
-    catch (e) { setError(e.message) }
+    try { await api.seedJobs() }
+    catch (e) { setError(e.message); setSeeding(false) }
     finally { setSeeding(false) }
   }
 
@@ -81,7 +102,12 @@ export default function Dashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-semibold text-zinc-100 tracking-tight">Jobs</h1>
-          <p className="text-zinc-600 text-xs font-mono mt-0.5">polling every 3s</p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <span className={`w-1 h-1 rounded-full ${wsStatus === 'connected' ? 'bg-emerald-500' : 'bg-amber-500 animate-pulse'}`} />
+            <p className="text-zinc-600 text-xs font-mono">
+              {wsStatus === 'connected' ? 'real-time' : 'connecting…'}
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -142,7 +168,7 @@ export default function Dashboard() {
         {filters.map(s => (
           <button
             key={s}
-            onClick={() => setFilter(s)}
+            onClick={() => handleFilter(s)}
             className={`h-6 px-2.5 rounded text-2xs font-mono transition-colors ${
               filter === s
                 ? 'bg-zinc-700 text-zinc-100'
@@ -178,7 +204,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job, i) => (
+              {jobs.map((job) => (
                 <tr
                   key={job.id}
                   className={`border-b border-zinc-800/60 hover:bg-zinc-900/60 transition-colors last:border-0 ${

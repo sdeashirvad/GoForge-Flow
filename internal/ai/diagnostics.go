@@ -94,7 +94,7 @@ func buildSuggestions(job *storage.Job) string {
 	return strings.Join(tips, " | ")
 }
 
-// GroqDiagnosticsEngine uses the Groq API (llama3-8b-8192) for real diagnostics.
+// GroqDiagnosticsEngine uses the Groq API (llama-3.1-8b-instant) for real diagnostics.
 type GroqDiagnosticsEngine struct {
 	apiKey string
 	client *http.Client
@@ -124,7 +124,7 @@ type groqResponse struct {
 func NewGroqEngine() *GroqDiagnosticsEngine {
 	return &GroqDiagnosticsEngine{
 		apiKey: os.Getenv("GROQ_API_KEY"),
-		client: &http.Client{Timeout: 20 * time.Second},
+		client: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -157,15 +157,16 @@ Execution Logs:
 Provide a concise JSON response with fields:
 - summary: one sentence describing what likely went wrong
 - root_cause: technical explanation (2-3 sentences)
-- suggestions: pipe-separated actionable fixes
+- suggestions: pipe-separated actionable fixes (use | as separator, no newlines)
 
-Respond ONLY with valid JSON, no markdown.`,
+Respond ONLY with valid JSON, no markdown, no code fences.`,
 		job.ID, job.Type, job.ErrorMessage, job.RetryCount, job.MaxRetries,
 		job.Payload, logLines.String())
 
 	body, _ := json.Marshal(groqRequest{
-		Model: "llama3-8b-8192",
+		Model: "llama-3.1-8b-instant",
 		Messages: []groqMessage{
+			{Role: "system", Content: "You are a precise backend systems diagnostic AI. Always respond with valid JSON only."},
 			{Role: "user", Content: prompt},
 		},
 	})
@@ -194,7 +195,13 @@ Respond ONLY with valid JSON, no markdown.`,
 		return nil, fmt.Errorf("no choices in groq response")
 	}
 
-	content := gr.Choices[0].Message.Content
+	content := strings.TrimSpace(gr.Choices[0].Message.Content)
+	// Strip markdown code fences if present
+	content = strings.TrimPrefix(content, "```json")
+	content = strings.TrimPrefix(content, "```")
+	content = strings.TrimSuffix(content, "```")
+	content = strings.TrimSpace(content)
+
 	var parsed struct {
 		Summary     string `json:"summary"`
 		RootCause   string `json:"root_cause"`
@@ -206,11 +213,14 @@ Respond ONLY with valid JSON, no markdown.`,
 		parsed.Suggestions = "Review logs manually."
 	}
 
+	model := "groq/llama-3.1-8b-instant"
+	slog.Info("groq diagnostic generated", "job_id", job.ID, "model", model)
+
 	return &storage.JobDiagnostic{
 		JobID:       job.ID,
 		Summary:     parsed.Summary,
 		RootCause:   parsed.RootCause,
 		Suggestions: parsed.Suggestions,
-		ModelUsed:   "groq/llama3-8b-8192",
+		ModelUsed:   model,
 	}, nil
 }

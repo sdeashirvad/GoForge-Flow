@@ -14,6 +14,7 @@ import (
 	"github.com/flowforge/flowforge-go/internal/queue"
 	"github.com/flowforge/flowforge-go/internal/storage"
 	"github.com/flowforge/flowforge-go/internal/workers"
+	"github.com/flowforge/flowforge-go/internal/ws"
 	"gorm.io/gorm"
 )
 
@@ -22,14 +23,16 @@ type Handler struct {
 	q    queue.JobQueue
 	pool *workers.Pool
 	ai   *ai.GroqDiagnosticsEngine
+	hub  *ws.Hub
 }
 
-func NewHandler(db *gorm.DB, q queue.JobQueue, pool *workers.Pool) *Handler {
+func NewHandler(db *gorm.DB, q queue.JobQueue, pool *workers.Pool, hub *ws.Hub) *Handler {
 	return &Handler{
 		db:   db,
 		q:    q,
 		pool: pool,
 		ai:   ai.NewGroqEngine(),
+		hub:  hub,
 	}
 }
 
@@ -107,6 +110,7 @@ func (h *Handler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		h.q.Enqueue(job)
 	}
 
+	h.hub.Broadcast("job_created", job)
 	slog.Info("job created", "job_id", job.ID, "type", job.Type, "status", job.Status)
 	writeJSON(w, http.StatusCreated, job)
 }
@@ -199,6 +203,7 @@ func (h *Handler) RetryJob(w http.ResponseWriter, r *http.Request) {
 	h.db.Where("job_id = ?", id).Delete(&storage.JobDiagnostic{})
 	h.q.Enqueue(&job)
 
+	h.hub.Broadcast("job_updated", job)
 	slog.Info("job manually retried", "job_id", job.ID)
 	writeJSON(w, http.StatusOK, job)
 }
@@ -216,6 +221,7 @@ func (h *Handler) DeleteJob(w http.ResponseWriter, r *http.Request) {
 	h.db.Where("job_id = ?", id).Delete(&storage.RetryHistory{})
 	h.db.Where("job_id = ?", id).Delete(&storage.JobDiagnostic{})
 
+	h.hub.Broadcast("job_deleted", map[string]string{"id": id})
 	writeJSON(w, http.StatusOK, map[string]string{"message": "job deleted"})
 }
 
@@ -238,7 +244,11 @@ func (h *Handler) DiagnoseJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.db.Where(storage.JobDiagnostic{JobID: id}).Assign(diag).FirstOrCreate(diag)
+	// Always overwrite (re-generate) existing diagnostic
+	h.db.Where("job_id = ?", id).Delete(&storage.JobDiagnostic{})
+	h.db.Create(diag)
+
+	h.hub.Broadcast("job_diagnosed", map[string]any{"job_id": id, "diagnostic": diag})
 	writeJSON(w, http.StatusOK, diag)
 }
 
@@ -314,5 +324,6 @@ func (h *Handler) SeedJobs(w http.ResponseWriter, r *http.Request) {
 		created = append(created, *job)
 	}
 
+	h.hub.Broadcast("jobs_seeded", map[string]any{"count": len(created)})
 	writeJSON(w, http.StatusCreated, map[string]any{"created": len(created), "jobs": created})
 }

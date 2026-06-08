@@ -1,17 +1,17 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import SubmitJob from './pages/SubmitJob'
 import JobDetails from './pages/JobDetails'
+import About from './pages/About'
 
 function Nav() {
-  const loc = useLocation()
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm sticky top-0 z-50">
       <div className="max-w-6xl mx-auto px-5">
         <div className="flex items-center justify-between h-12">
           <div className="flex items-center gap-5">
-            <NavLink to="/" className="flex items-center gap-2 group">
+            <NavLink to="/" className="flex items-center gap-2">
               <span className="text-zinc-100 font-semibold text-sm tracking-tight">FlowForge</span>
               <span className="text-zinc-600 text-xs font-mono hidden sm:inline">Go</span>
             </NavLink>
@@ -19,6 +19,7 @@ function Nav() {
               {[
                 { to: '/', label: 'Dashboard', exact: true },
                 { to: '/submit', label: 'New Job' },
+                { to: '/about', label: 'About' },
               ].map(({ to, label, exact }) => (
                 <NavLink
                   key={to}
@@ -57,6 +58,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/submit" element={<SubmitJob />} />
             <Route path="/jobs/:id" element={<JobDetails />} />
+            <Route path="/about" element={<About />} />
           </Routes>
         </main>
       </div>

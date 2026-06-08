@@ -12,28 +12,31 @@ import (
 	"github.com/flowforge/flowforge-go/internal/jobs"
 	"github.com/flowforge/flowforge-go/internal/queue"
 	"github.com/flowforge/flowforge-go/internal/storage"
+	"github.com/flowforge/flowforge-go/internal/ws"
 	"gorm.io/gorm"
 )
 
 // Pool manages a fixed set of goroutine workers that drain the job queue.
 type Pool struct {
-	size      int
-	queue     queue.JobQueue
-	executor  *jobs.Executor
-	db        *gorm.DB
-	ai        *ai.GroqDiagnosticsEngine
-	wg        sync.WaitGroup
-	cancelFn  context.CancelFunc
+	size       int
+	queue      queue.JobQueue
+	executor   *jobs.Executor
+	db         *gorm.DB
+	ai         *ai.GroqDiagnosticsEngine
+	hub        *ws.Hub
+	wg         sync.WaitGroup
+	cancelFn   context.CancelFunc
 	activeJobs sync.Map
 }
 
-func NewPool(size int, q queue.JobQueue, db *gorm.DB) *Pool {
+func NewPool(size int, q queue.JobQueue, db *gorm.DB, hub *ws.Hub) *Pool {
 	return &Pool{
 		size:     size,
 		queue:    q,
 		executor: jobs.NewExecutor(db),
 		db:       db,
 		ai:       ai.NewGroqEngine(),
+		hub:      hub,
 	}
 }
 
@@ -80,6 +83,7 @@ func (p *Pool) processJob(ctx context.Context, job *storage.Job, workerID string
 	job.StartedAt = &now
 	job.WorkerID = workerID
 	p.db.Save(job)
+	p.hub.Broadcast("job_updated", job)
 
 	slog.Info("job started", "job_id", job.ID, "type", job.Type, "worker", workerID, "attempt", job.RetryCount+1)
 
@@ -98,6 +102,7 @@ func (p *Pool) processJob(ctx context.Context, job *storage.Job, workerID string
 	} else {
 		job.Status = storage.StatusCompleted
 		p.db.Save(job)
+		p.hub.Broadcast("job_updated", job)
 		slog.Info("job completed", "job_id", job.ID, "duration_ms", durationMs)
 	}
 }
@@ -121,6 +126,7 @@ func (p *Pool) handleFailure(ctx context.Context, job *storage.Job, execErr erro
 		job.Status = storage.StatusQueued
 		job.WorkerID = ""
 		p.db.Save(job)
+		p.hub.Broadcast("job_updated", job)
 
 		slog.Warn("job failed, scheduling retry",
 			"job_id", job.ID,
@@ -130,7 +136,6 @@ func (p *Pool) handleFailure(ctx context.Context, job *storage.Job, execErr erro
 			"error", errMsg,
 		)
 
-		// Update backoff on last retry history
 		p.db.Model(&storage.RetryHistory{}).
 			Where("job_id = ? AND attempt_num = ?", job.ID, job.RetryCount).
 			Update("backoff_secs", backoff)
@@ -146,6 +151,7 @@ func (p *Pool) handleFailure(ctx context.Context, job *storage.Job, execErr erro
 	} else {
 		job.Status = storage.StatusFailed
 		p.db.Save(job)
+		p.hub.Broadcast("job_updated", job)
 
 		slog.Error("job permanently failed",
 			"job_id", job.ID,
@@ -153,7 +159,6 @@ func (p *Pool) handleFailure(ctx context.Context, job *storage.Job, execErr erro
 			"error", errMsg,
 		)
 
-		// Generate AI diagnostic asynchronously
 		go p.generateDiagnostic(job)
 	}
 }
@@ -168,11 +173,10 @@ func (p *Pool) generateDiagnostic(job *storage.Job) {
 		return
 	}
 
-	// Upsert diagnostic
-	p.db.Where(storage.JobDiagnostic{JobID: job.ID}).
-		Assign(diag).
-		FirstOrCreate(diag)
+	p.db.Where("job_id = ?", job.ID).Delete(&storage.JobDiagnostic{})
+	p.db.Create(diag)
 
+	p.hub.Broadcast("job_diagnosed", map[string]any{"job_id": job.ID, "diagnostic": diag})
 	slog.Info("diagnostic generated", "job_id", job.ID, "model", diag.ModelUsed)
 }
 

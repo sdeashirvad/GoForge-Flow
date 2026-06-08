@@ -1,7 +1,7 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import { usePolling } from '../hooks/usePolling'
+import { useWebSocket } from '../hooks/useWebSocket'
 import StatusBadge from '../components/StatusBadge'
 import JobTypeTag from '../components/JobTypeTag'
 
@@ -16,14 +16,15 @@ const LOG_COLORS = {
   DEBUG: 'text-zinc-600',
 }
 
-function Section({ title, badge, children }) {
+function Section({ title, badge, action, children }) {
   return (
     <div className="border border-zinc-800 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-900/40">
         <span className="text-xs font-medium text-zinc-400 font-mono">{title}</span>
-        {badge != null && (
-          <span className="text-zinc-600 text-2xs font-mono">{badge}</span>
-        )}
+        <div className="flex items-center gap-3">
+          {badge != null && <span className="text-zinc-600 text-2xs font-mono">{badge}</span>}
+          {action}
+        </div>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -48,25 +49,55 @@ export default function JobDetails() {
   const [diagLoading, setDiagLoading] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const idRef = useRef(id)
 
   const job = data?.job
-  const isLive = job?.status === 'running' || job?.status === 'queued'
 
   const refresh = useCallback(async () => {
     try {
-      setData(await api.getJob(id))
+      setData(await api.getJob(idRef.current))
       setError(null)
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
-  }, [id])
+  }, [])
 
-  usePolling(refresh, 2000, isLive || loading)
+  React.useEffect(() => { refresh() }, [refresh])
 
-  const act = async (fn, setter) => {
-    setter(true)
-    try { await fn(); await refresh() }
+  // WebSocket — update this job when server pushes changes
+  const handleWsMessage = useCallback((event) => {
+    if (event.type === 'job_updated' && event.payload?.id === idRef.current) {
+      refresh()
+    }
+    if (event.type === 'job_diagnosed' && event.payload?.job_id === idRef.current) {
+      refresh()
+    }
+    if (event.type === 'job_deleted' && event.payload?.id === idRef.current) {
+      navigate('/')
+    }
+  }, [refresh, navigate])
+
+  useWebSocket(handleWsMessage)
+
+  const handleDiagnose = async () => {
+    setDiagLoading(true)
+    try {
+      await api.diagnoseJob(id)
+      await refresh()
+    } catch (e) { setError(e.message) }
+    finally { setDiagLoading(false) }
+  }
+
+  const handleRetry = async () => {
+    setRetrying(true)
+    try { await api.retryJob(id); await refresh() }
     catch (e) { setError(e.message) }
-    finally { setter(false) }
+    finally { setRetrying(false) }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try { await api.deleteJob(id); navigate('/') }
+    catch (e) { setError(e.message); setDeleting(false) }
   }
 
   if (loading) return (
@@ -80,6 +111,8 @@ export default function JobDetails() {
   )
 
   const { logs = [], retries = [], diagnostic } = data || {}
+  const isFailed = job?.status === 'failed'
+  const isDone = job?.status === 'completed' || job?.status === 'failed'
 
   return (
     <div className="space-y-4 max-w-4xl">
@@ -104,27 +137,27 @@ export default function JobDetails() {
             </div>
             <p className="font-mono text-zinc-600 text-2xs">{job.id}</p>
           </div>
-          <div className="flex items-center gap-1.5">
-            {job.status === 'failed' && (
-              <>
-                <button
-                  onClick={() => act(() => api.diagnoseJob(id), setDiagLoading)}
-                  disabled={diagLoading}
-                  className="h-7 px-3 text-xs font-mono text-violet-400 bg-violet-950/40 border border-violet-800/60 rounded hover:bg-violet-900/40 disabled:opacity-40 transition-colors"
-                >
-                  {diagLoading ? 'analysing…' : 'ai diagnose'}
-                </button>
-                <button
-                  onClick={() => act(() => api.retryJob(id), setRetrying)}
-                  disabled={retrying}
-                  className="h-7 px-3 text-xs font-mono text-blue-400 bg-blue-950/40 border border-blue-800/60 rounded hover:bg-blue-900/40 disabled:opacity-40 transition-colors"
-                >
-                  {retrying ? 'retrying…' : 'retry'}
-                </button>
-              </>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {isDone && (
+              <button
+                onClick={handleDiagnose}
+                disabled={diagLoading}
+                className="h-7 px-3 text-xs font-mono text-violet-400 bg-violet-950/40 border border-violet-800/60 rounded hover:bg-violet-900/40 disabled:opacity-40 transition-colors"
+              >
+                {diagLoading ? 'analysing…' : diagnostic ? '↺ re-diagnose' : 'ai diagnose'}
+              </button>
+            )}
+            {isFailed && (
+              <button
+                onClick={handleRetry}
+                disabled={retrying}
+                className="h-7 px-3 text-xs font-mono text-blue-400 bg-blue-950/40 border border-blue-800/60 rounded hover:bg-blue-900/40 disabled:opacity-40 transition-colors"
+              >
+                {retrying ? 'retrying…' : 'retry'}
+              </button>
             )}
             <button
-              onClick={() => act(async () => { await api.deleteJob(id); navigate('/') }, setDeleting)}
+              onClick={handleDelete}
               disabled={deleting}
               className="h-7 px-3 text-xs font-mono text-zinc-600 bg-zinc-900 border border-zinc-800 rounded hover:text-red-400 hover:border-red-900 disabled:opacity-40 transition-colors"
             >
@@ -152,30 +185,62 @@ export default function JobDetails() {
         )}
       </div>
 
-      {/* AI Diagnostic */}
-      {diagnostic && (
-        <Section title="ai diagnostic" badge={diagnostic.model_used}>
-          <div className="space-y-3">
-            <div>
-              <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">summary</p>
-              <p className="text-xs text-zinc-200">{diagnostic.summary}</p>
+      {/* AI Diagnostic — shown for completed AND failed */}
+      {isDone && (
+        <Section
+          title="ai diagnostic"
+          badge={diagnostic?.model_used}
+          action={
+            <button
+              onClick={handleDiagnose}
+              disabled={diagLoading}
+              className="text-2xs font-mono text-violet-500 hover:text-violet-300 disabled:opacity-40 transition-colors"
+            >
+              {diagLoading ? 'running…' : diagnostic ? '↺ regenerate' : 'run analysis'}
+            </button>
+          }
+        >
+          {diagLoading ? (
+            <div className="flex items-center gap-2 text-xs text-zinc-500 font-mono">
+              <span className="w-3 h-3 border border-violet-600 border-t-transparent rounded-full animate-spin" />
+              querying llama-3.1-8b-instant…
             </div>
-            <div>
-              <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">root cause</p>
-              <p className="text-xs text-zinc-400">{diagnostic.root_cause}</p>
+          ) : diagnostic ? (
+            <div className="space-y-3">
+              <div>
+                <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">summary</p>
+                <p className="text-xs text-zinc-200">{diagnostic.summary}</p>
+              </div>
+              <div>
+                <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">root cause</p>
+                <p className="text-xs text-zinc-400">{diagnostic.root_cause}</p>
+              </div>
+              <div>
+                <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">suggestions</p>
+                <ul className="space-y-1">
+                  {diagnostic.suggestions.split('|').map((s, i) => (
+                    <li key={i} className="text-xs text-zinc-400 flex items-start gap-2">
+                      <span className="text-violet-600 shrink-0 mt-0.5">›</span>
+                      {s.trim()}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <p className="text-zinc-700 text-2xs font-mono pt-1">
+                generated {fmtDate(diagnostic.created_at)}
+              </p>
             </div>
-            <div>
-              <p className="text-2xs font-mono text-zinc-600 uppercase tracking-widest mb-1">suggestions</p>
-              <ul className="space-y-1">
-                {diagnostic.suggestions.split('|').map((s, i) => (
-                  <li key={i} className="text-xs text-zinc-400 flex items-start gap-2">
-                    <span className="text-violet-600 shrink-0">›</span>
-                    {s.trim()}
-                  </li>
-                ))}
-              </ul>
+          ) : (
+            <div className="text-center py-4 space-y-2">
+              <p className="text-zinc-600 text-xs font-mono">no diagnostic yet</p>
+              <button
+                onClick={handleDiagnose}
+                className="text-violet-500 hover:text-violet-300 text-xs font-mono underline underline-offset-2 transition-colors"
+              >
+                run ai analysis →
+              </button>
             </div>
-          </div>
+          )}
         </Section>
       )}
 

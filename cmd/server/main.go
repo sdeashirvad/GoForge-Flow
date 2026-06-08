@@ -15,6 +15,7 @@ import (
 	"github.com/flowforge/flowforge-go/internal/scheduler"
 	"github.com/flowforge/flowforge-go/internal/storage"
 	"github.com/flowforge/flowforge-go/internal/workers"
+	"github.com/flowforge/flowforge-go/internal/ws"
 )
 
 func main() {
@@ -33,8 +34,8 @@ func main() {
 	}
 
 	q := queue.NewInMemoryQueue(512)
-
-	pool := workers.NewPool(5, q, db)
+	hub := ws.NewHub()
+	pool := workers.NewPool(5, q, db, hub)
 
 	staticDir := os.Getenv("STATIC_DIR")
 	if staticDir == "" {
@@ -44,7 +45,7 @@ func main() {
 		staticDir = ""
 	}
 
-	router := api.NewRouter(db, q, pool, staticDir)
+	router := api.NewRouter(db, q, pool, hub, staticDir)
 
 	port := os.Getenv("PORT")
 	if port == "" {
