@@ -1,0 +1,1 @@
+- [FlowForge Go setup](flowforge-setup.md) — pgx/v5 and x/crypto blocked by Socket Security; use build tags + Docker swap for postgres
