@@ -2,29 +2,48 @@ import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 
-const jobTypes = [
+const JOB_TYPES = [
   {
     value: 'csv_processing',
     label: 'CSV Processing',
-    icon: '📊',
-    description: 'Validate and process CSV rows concurrently',
-    defaultPayload: { rows: 150, source: 'transactions_export.csv' },
+    desc: 'Validate and process CSV rows concurrently (8 workers)',
+    defaultPayload: {
+      rows: 200,
+      source: 'transactions_q4.csv',
+    },
   },
   {
     value: 'log_analysis',
     label: 'Log Analysis',
-    icon: '🔍',
-    description: 'Categorize log entries, identify root cause',
-    defaultPayload: { source: 'api-gateway', log_content: 'sample application logs' },
+    desc: 'Parse log content, detect error patterns, extract stack traces',
+    defaultPayload: {
+      source: 'api-gateway',
+      log_content: `[2024-01-15 10:23:41] INFO  server started on :8080
+[2024-01-15 10:24:02] INFO  GET /api/users 200 12ms
+[2024-01-15 10:24:15] WARN  database pool at 80% capacity (8/10)
+[2024-01-15 10:24:31] ERROR nil pointer dereference in handler ServeHTTP
+goroutine 47 [running]:
+  net/http.(*ServeMux).ServeHTTP(0xc000128000, {0x1234560, 0xc0001b4000}, 0xc0002a8000)
+    /usr/local/go/src/net/http/server.go:2547 +0x3b
+[2024-01-15 10:24:31] ERROR context deadline exceeded during upstream RPC call
+[2024-01-15 10:24:32] WARN  retrying request attempt=2
+[2024-01-15 10:24:33] ERROR connection refused: dial tcp 10.0.0.5:5432
+[2024-01-15 10:24:33] FATAL panic: runtime error: index out of range [5] with length 3`,
+    },
   },
   {
     value: 'monitoring',
     label: 'Endpoint Monitor',
-    icon: '📡',
-    description: 'Health check a remote endpoint with retry',
-    defaultPayload: { endpoint: 'https://api.example.com/health', timeout_ms: 5000 },
+    desc: 'Real HTTP GET — checks status code, measures latency, optionally matches body',
+    defaultPayload: {
+      endpoint: 'https://httpbin.org/status/200',
+      timeout_ms: 10000,
+      expected_status: 200,
+    },
   },
 ]
+
+const PRIORITY_OPTS = ['low', 'normal', 'high']
 
 export default function SubmitJob() {
   const navigate = useNavigate()
@@ -33,47 +52,36 @@ export default function SubmitJob() {
   const [maxRetries, setMaxRetries] = useState(3)
   const [scheduled, setScheduled] = useState('')
   const [payloadText, setPayloadText] = useState(
-    JSON.stringify(jobTypes[0].defaultPayload, null, 2)
+    JSON.stringify(JOB_TYPES[0].defaultPayload, null, 2)
   )
-  const [payloadError, setPayloadError] = useState('')
+  const [payloadErr, setPayloadErr] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  const handleTypeChange = (t) => {
+  const selectType = (t) => {
     setType(t)
-    const jt = jobTypes.find(j => j.value === t)
+    const jt = JOB_TYPES.find(j => j.value === t)
     setPayloadText(JSON.stringify(jt.defaultPayload, null, 2))
-    setPayloadError('')
+    setPayloadErr('')
   }
 
-  const validatePayload = (text) => {
-    try {
-      JSON.parse(text)
-      setPayloadError('')
-      return true
-    } catch (e) {
-      setPayloadError('Invalid JSON: ' + e.message)
-      return false
-    }
+  const checkJson = (text) => {
+    try { JSON.parse(text); setPayloadErr(''); return true }
+    catch (e) { setPayloadErr(e.message); return false }
   }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!validatePayload(payloadText)) return
-
-    setSubmitting(true)
-    setError('')
+    if (!checkJson(payloadText)) return
+    setSubmitting(true); setError('')
     try {
-      const data = {
-        type,
-        priority,
+      const body = {
+        type, priority,
         max_retries: maxRetries,
         payload: JSON.parse(payloadText),
+        ...(scheduled ? { scheduled_at: new Date(scheduled).toISOString() } : {}),
       }
-      if (scheduled) {
-        data.scheduled_at = new Date(scheduled).toISOString()
-      }
-      const job = await api.createJob(data)
+      const job = await api.createJob(body)
       navigate(`/jobs/${job.id}`)
     } catch (e) {
       setError(e.message)
@@ -81,116 +89,135 @@ export default function SubmitJob() {
     }
   }
 
+  const selected = JOB_TYPES.find(j => j.value === type)
+
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-xl space-y-6">
+
       <div>
-        <h1 className="text-2xl font-bold text-white">Submit Job</h1>
-        <p className="text-slate-500 text-sm mt-1">Configure and enqueue a new job</p>
+        <h1 className="text-base font-semibold text-zinc-100 tracking-tight">New Job</h1>
+        <p className="text-zinc-600 text-xs font-mono mt-0.5">configure and enqueue</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+
         {/* Job type */}
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">Job Type</label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {jobTypes.map(jt => (
+          <label className="block text-xs font-medium text-zinc-400 mb-2">Type</label>
+          <div className="space-y-1.5">
+            {JOB_TYPES.map(jt => (
               <button
                 key={jt.value}
                 type="button"
-                onClick={() => handleTypeChange(jt.value)}
-                className={`text-left p-3 rounded-lg border transition-all ${
+                onClick={() => selectType(jt.value)}
+                className={`w-full text-left px-3.5 py-3 rounded-lg border text-xs transition-all ${
                   type === jt.value
-                    ? 'border-forge-500 bg-forge-900/30 ring-1 ring-forge-500'
-                    : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                    ? 'border-zinc-500 bg-zinc-800/80'
+                    : 'border-zinc-800 bg-zinc-900 hover:border-zinc-700 hover:bg-zinc-800/40'
                 }`}
               >
-                <div className="text-lg mb-1">{jt.icon}</div>
-                <div className="text-sm font-medium text-white">{jt.label}</div>
-                <div className="text-xs text-slate-500 mt-0.5 leading-tight">{jt.description}</div>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-zinc-200 font-mono">{jt.value}</span>
+                  {type === jt.value && (
+                    <span className="text-zinc-400 text-2xs">selected</span>
+                  )}
+                </div>
+                <p className="text-zinc-500 mt-0.5 text-2xs">{jt.desc}</p>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Priority + retries row */}
-        <div className="grid grid-cols-2 gap-4">
+        {/* Monitoring hint */}
+        {type === 'monitoring' && (
+          <div className="border border-amber-900/50 bg-amber-950/20 rounded px-3 py-2 text-xs text-amber-400/80 font-mono">
+            Real HTTP request — try any URL. Invalid/unreachable hosts will fail with a real error.
+          </div>
+        )}
+
+        {/* Priority + retries */}
+        <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Priority</label>
-            <select
-              value={priority}
-              onChange={e => setPriority(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-forge-500"
-            >
-              <option value="low">Low</option>
-              <option value="normal">Normal</option>
-              <option value="high">High</option>
-            </select>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">Priority</label>
+            <div className="flex gap-1">
+              {PRIORITY_OPTS.map(p => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriority(p)}
+                  className={`flex-1 h-8 text-xs font-mono rounded border transition-colors ${
+                    priority === p
+                      ? 'border-zinc-500 bg-zinc-800 text-zinc-100'
+                      : 'border-zinc-800 bg-zinc-900 text-zinc-500 hover:border-zinc-700'
+                  }`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-300 mb-2">Max Retries</label>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">Max Retries</label>
             <input
-              type="number"
-              min="0"
-              max="10"
+              type="number" min="0" max="10"
               value={maxRetries}
-              onChange={e => setMaxRetries(parseInt(e.target.value))}
-              className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-forge-500"
+              onChange={e => setMaxRetries(+e.target.value)}
+              className="w-full h-8 bg-zinc-900 border border-zinc-800 rounded px-3 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
             />
           </div>
         </div>
 
         {/* Schedule */}
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">
-            Schedule At <span className="text-slate-600 font-normal">(optional — leave blank to run immediately)</span>
+          <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+            Schedule <span className="text-zinc-600 font-normal">(optional — blank = immediate)</span>
           </label>
           <input
             type="datetime-local"
             value={scheduled}
             onChange={e => setScheduled(e.target.value)}
-            className="w-full bg-slate-900 border border-slate-700 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-forge-500"
+            className="w-full h-8 bg-zinc-900 border border-zinc-800 rounded px-3 text-xs font-mono text-zinc-400 focus:outline-none focus:border-zinc-600 transition-colors"
           />
         </div>
 
         {/* Payload */}
         <div>
-          <label className="block text-sm font-medium text-slate-300 mb-2">
-            Payload <span className="text-slate-600 font-normal">(JSON)</span>
-          </label>
+          <div className="flex items-center justify-between mb-1.5">
+            <label className="text-xs font-medium text-zinc-400">Payload</label>
+            <span className={`text-2xs font-mono ${payloadErr ? 'text-red-400' : 'text-zinc-600'}`}>
+              {payloadErr ? 'invalid json' : 'json'}
+            </span>
+          </div>
           <textarea
-            rows={7}
+            rows={9}
             value={payloadText}
-            onChange={e => {
-              setPayloadText(e.target.value)
-              validatePayload(e.target.value)
-            }}
-            className={`w-full bg-slate-900 border rounded-md px-3 py-2 text-sm font-mono text-slate-300 focus:outline-none focus:ring-1 focus:ring-forge-500 resize-none ${
-              payloadError ? 'border-red-700' : 'border-slate-700'
+            onChange={e => { setPayloadText(e.target.value); checkJson(e.target.value) }}
+            spellCheck={false}
+            className={`w-full bg-zinc-950 border rounded px-3 py-2.5 text-xs font-mono text-zinc-300 focus:outline-none resize-none transition-colors leading-relaxed ${
+              payloadErr ? 'border-red-800' : 'border-zinc-800 focus:border-zinc-600'
             }`}
           />
-          {payloadError && (
-            <p className="text-red-400 text-xs mt-1">{payloadError}</p>
-          )}
+          {payloadErr && <p className="text-red-400 text-2xs font-mono mt-1">{payloadErr}</p>}
         </div>
 
         {error && (
-          <div className="bg-red-900/30 border border-red-800 rounded-md p-3 text-red-300 text-sm">
+          <div className="border border-red-900 bg-red-950/20 rounded px-3 py-2 text-xs text-red-400 font-mono">
             {error}
           </div>
         )}
 
-        <div className="flex gap-3">
+        <div className="flex gap-2 pt-1">
           <button
             type="submit"
-            disabled={submitting || !!payloadError}
-            className="px-6 py-2.5 bg-forge-600 hover:bg-forge-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50"
+            disabled={submitting || !!payloadErr}
+            className="h-8 px-4 bg-zinc-100 hover:bg-white text-zinc-900 text-xs font-medium rounded disabled:opacity-40 transition-colors"
           >
-            {submitting ? 'Submitting...' : 'Submit Job'}
+            {submitting ? 'Submitting…' : 'Enqueue job'}
           </button>
           <button
             type="button"
             onClick={() => navigate('/')}
-            className="px-6 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-sm font-medium transition-colors border border-slate-700"
+            className="h-8 px-4 text-xs font-medium text-zinc-500 hover:text-zinc-300 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded transition-colors"
           >
             Cancel
           </button>

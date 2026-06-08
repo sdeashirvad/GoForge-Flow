@@ -1,16 +1,16 @@
 import React from 'react'
 
-const config = {
-  csv_processing: { label: 'CSV',        icon: '📊', cls: 'bg-violet-900/50 text-violet-300 border-violet-800' },
-  log_analysis:   { label: 'Log',        icon: '🔍', cls: 'bg-cyan-900/50 text-cyan-300 border-cyan-800' },
-  monitoring:     { label: 'Monitor',    icon: '📡', cls: 'bg-orange-900/50 text-orange-300 border-orange-800' },
+const map = {
+  csv_processing: { label: 'csv',     cls: 'text-violet-400 border-violet-800/50 bg-violet-950/40' },
+  log_analysis:   { label: 'logs',    cls: 'text-cyan-400   border-cyan-800/50   bg-cyan-950/40'   },
+  monitoring:     { label: 'monitor', cls: 'text-orange-400 border-orange-800/50 bg-orange-950/40' },
 }
 
 export default function JobTypeTag({ type }) {
-  const c = config[type] || { label: type, icon: '⚙️', cls: 'bg-slate-800 text-slate-400 border-slate-700' }
+  const c = map[type] || { label: type, cls: 'text-zinc-400 border-zinc-700 bg-zinc-900' }
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs font-medium ${c.cls}`}>
-      <span>{c.icon}</span> {c.label}
+    <span className={`inline-block px-1.5 py-0.5 rounded border text-2xs font-mono font-medium ${c.cls}`}>
+      {c.label}
     </span>
   )
 }
