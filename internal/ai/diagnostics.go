@@ -143,7 +143,7 @@ func (g *GroqDiagnosticsEngine) Diagnose(job *storage.Job, logs []storage.JobLog
 		logLines.WriteString(fmt.Sprintf("[%s] %s\n", l.Level, l.Message))
 	}
 
-	prompt := fmt.Sprintf(`You are a backend systems diagnostic AI. A job failed in production.
+	prompt := fmt.Sprintf(`You are a backend systems diagnostic AI. A job executed in production (could be success or failed).
 
 Job ID: %s
 Job Type: %s
@@ -155,7 +155,7 @@ Execution Logs:
 %s
 
 Provide a concise JSON response with fields:
-- summary: one sentence describing what likely went wrong
+- summary: one sentence describing what happened (in case of failure - what likely went wrong)
 - root_cause: technical explanation (2-3 sentences)
 - suggestions: pipe-separated actionable fixes (use | as separator, no newlines)
 
