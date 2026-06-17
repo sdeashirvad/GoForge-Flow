@@ -32,3 +32,4 @@ trap cleanup SIGINT SIGTERM EXIT
 
 # Wait for either to exit
 wait -n $GO_PID $VITE_PID
+# Fixed line endings
