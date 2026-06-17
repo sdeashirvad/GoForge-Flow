@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+*.db
+Resume_*.pdf
+plan.md
+.agents
+.replit
+replit.md
+start.sh
+start.bat
+railway-start.sh

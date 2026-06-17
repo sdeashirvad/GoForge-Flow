@@ -18,6 +18,9 @@ RUN go mod download
 
 COPY . .
 
+# COPY . . overwrites go.mod with the local SQLite-only version — restore Docker variant
+COPY go.mod.docker go.mod
+
 # Replace the SQLite-only fallback with a real Postgres opener
 RUN rm -f internal/storage/nopg.go && \
     printf 'package storage\nimport ("gorm.io/driver/postgres"\n"gorm.io/gorm")\nfunc openPostgres(dsn string, cfg *gorm.Config) (*gorm.DB, error) {\nreturn gorm.Open(postgres.Open(dsn), cfg)\n}\n' \
