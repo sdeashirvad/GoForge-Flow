@@ -26,6 +26,9 @@ RUN rm -f internal/storage/nopg.go && \
     printf 'package storage\nimport ("gorm.io/driver/postgres"\n"gorm.io/gorm")\nfunc openPostgres(dsn string, cfg *gorm.Config) (*gorm.DB, error) {\nreturn gorm.Open(postgres.Open(dsn), cfg)\n}\n' \
     > internal/storage/postgres_impl.go
 
+# Local go.sum lacks postgres checksums — resolve deps for the Docker module set
+RUN go mod tidy
+
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /flowforge ./cmd/server
 
 # ── Stage 3: Minimal final image ────────────────────────────────────────────────
