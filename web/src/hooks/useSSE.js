@@ -1,8 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 
-// Uses Server-Sent Events (SSE) instead of WebSocket.
-// SSE works through all HTTP proxies (including Vite dev proxy) without special config.
-export function useWebSocket(onMessage) {
+// Server-Sent Events for live job updates
+export function useSSE(onMessage) {
   const onMsg = useRef(onMessage)
   const esRef = useRef(null)
   const retryTimer = useRef(null)
@@ -32,6 +31,7 @@ export function useWebSocket(onMessage) {
     es.onerror = () => {
       es.close()
       esRef.current = null
+      onMsg.current({ type: '_disconnected' })
       retryTimer.current = setTimeout(connect, 3000)
     }
   }, [])
