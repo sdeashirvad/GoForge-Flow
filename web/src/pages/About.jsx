@@ -1,18 +1,25 @@
 import React, { useState, useEffect } from 'react'
-import { Activity, Database, Cpu, Radio } from 'lucide-react'
+import { Activity, Database, Cpu, Radio, Layers, Users, Clock, Workflow } from 'lucide-react'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Panel } from '@/components/design-system/Panel'
+import { PageSection } from '@/components/design-system/PageSection'
+import { LabsBranding } from '@/components/layout/LabsBranding'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 
-const packages = [
-  { name: 'queue', role: 'Channel-based job dispatch (cap 512)' },
-  { name: 'workers', role: 'Fixed goroutine pool + retry engine' },
-  { name: 'jobs', role: 'Per-type executors (CSV, logs, HTTP)' },
-  { name: 'scheduler', role: 'Promotes scheduled → queued every 10s' },
-  { name: 'storage', role: 'GORM + SQLite/PostgreSQL' },
-  { name: 'ws', role: 'SSE hub for live dashboard updates' },
+const concepts = [
+  { icon: Layers, title: 'Jobs', desc: 'Typed workflow units with payload, priority, and retry policy.' },
+  { icon: Users, title: 'Worker Pool', desc: 'Fixed goroutine pool with channel-based dispatch and worker_id tracking.' },
+  { icon: Clock, title: 'Scheduler', desc: 'Promotes future-dated jobs from scheduled to queued every 10 seconds.' },
+  { icon: Radio, title: 'SSE Observatory', desc: 'Server-sent events push live status updates to the dashboard.' },
+]
+
+const roadmap = [
+  'Persistent queue (Redis Streams / NATS)',
+  'Priority queue enforcement',
+  'DAG dependencies between jobs',
+  'Horizontal worker scaling',
 ]
 
 export default function About() {
@@ -27,113 +34,110 @@ export default function About() {
   }, [])
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="space-y-12 max-w-3xl">
       <PageHeader
-        title="About FlowForge"
-        description="Orchestration primitives in Go — the engine behind Airflow/Celery, made visible."
+        title="About GoForge"
+        description="A workflow orchestration platform for reliable business process execution."
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>The Story</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4 text-sm text-muted-foreground leading-relaxed">
-          <p>
-            After migrating production treasury pipelines to distributed Airflow with Celery —
-            retries, failover, SLA monitoring — I asked a simple question: do I understand what
-            the orchestrator is doing, or am I just configuring DAGs?
+      <Panel glass>
+        <div className="space-y-4 text-sm text-muted-foreground leading-relaxed">
+          <p className="text-base text-foreground font-medium">
+            GoForge reimplements Airflow/Celery orchestration primitives in Go — made visible through a live observatory.
           </p>
           <p>
-            FlowForge Go reimplements the core primitives in ~1,700 lines of Go: a channel-based
-            queue, fixed worker pool, exponential-backoff retry engine, cron-style scheduler,
-            and graceful shutdown. The dashboard is an <span className="text-foreground font-medium">observatory</span>,
-            not the product.
+            After migrating production treasury pipelines to distributed Airflow with Celery,
+            I asked: do I understand what the orchestrator is doing, or am I just configuring DAGs?
+            GoForge answers that question with ~1,700 lines of readable Go.
           </p>
-          <p>
-            <span className="text-foreground font-medium">What to watch in the demo:</span> click
-            Run load demo and observe exactly 5 workers activate, queue depth rise, and retry
-            backoff timestamps on failed jobs. That is what Celery does inside Airflow workers —
-            made visible.
-          </p>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Architecture</CardTitle>
-          <CardDescription>Read the entire orchestration layer in one sitting</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center justify-center gap-2 py-4 text-sm font-mono">
-            <Badge variant="outline" className="px-3 py-1">HTTP API</Badge>
-            <span className="text-muted-foreground">→</span>
-            <Badge variant="outline" className="px-3 py-1">queue</Badge>
-            <span className="text-muted-foreground">→</span>
-            <Badge variant="outline" className="px-3 py-1 border-primary/50 text-primary">workers</Badge>
-            <span className="text-muted-foreground">→</span>
-            <Badge variant="outline" className="px-3 py-1">executor</Badge>
-            <span className="text-muted-foreground">→</span>
-            <Badge variant="outline" className="px-3 py-1">retry / SSE</Badge>
+      <PageSection title="Problem solved">
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Business processes need reliable async execution — retries, scheduling, observability —
+          without framework lock-in. GoForge provides the core primitives (queue, pool, backoff, shutdown)
+          as a deployable system you can read in an afternoon.
+        </p>
+      </PageSection>
+
+      <PageSection title="Core concepts">
+        <div className="grid gap-4 sm:grid-cols-2">
+          {concepts.map(({ icon: Icon, title, desc }) => (
+            <div key={title} className="rounded-lg border bg-card p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <Icon className="h-4 w-4 text-primary" />
+                <h3 className="text-sm font-semibold">{title}</h3>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">{desc}</p>
+            </div>
+          ))}
+        </div>
+      </PageSection>
+
+      <PageSection title="Design philosophy">
+        <Panel>
+          <ul className="space-y-3 text-sm text-muted-foreground">
+            <li className="flex gap-2">
+              <span className="text-primary">•</span>
+              <span><strong className="text-foreground">Intentional smallness</strong> — entire backend fits one PR review</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary">•</span>
+              <span><strong className="text-foreground">Honest tradeoffs</strong> — in-memory queue documented, not hidden</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary">•</span>
+              <span><strong className="text-foreground">Observatory-first</strong> — watch workers breathe in real time via SSE</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-primary">•</span>
+              <span><strong className="text-foreground">Pattern portability</strong> — same ideas as Airflow/Celery, framework-free</span>
+            </li>
+          </ul>
+        </Panel>
+      </PageSection>
+
+      <PageSection title="Roadmap">
+        <div className="flex flex-wrap gap-2">
+          {roadmap.map((item) => (
+            <Badge key={item} variant="outline" className="text-xs">{item}</Badge>
+          ))}
+        </div>
+      </PageSection>
+
+      <PageSection title="System status">
+        {loading ? (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-20 rounded-lg" />
+            ))}
           </div>
-          <div className="mt-4 space-y-3">
-            {packages.map((p) => (
-              <div key={p.name} className="flex flex-col sm:flex-row sm:gap-4 py-2 border-b border-border/60 last:border-0">
-                <code className="text-sm font-mono text-primary shrink-0 sm:w-28">internal/{p.name}</code>
-                <span className="text-sm text-muted-foreground">{p.role}</span>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {[
+              { icon: Activity, label: 'API', value: health?.status },
+              { icon: Database, label: 'Database', value: health?.database },
+              { icon: Cpu, label: 'Groq AI', value: health?.groq },
+              { icon: Workflow, label: 'Queue', value: `${health?.queue_depth ?? 0} buffered` },
+            ].map(({ icon: Icon, label, value }) => (
+              <div key={label} className="flex items-center gap-4 rounded-lg border bg-card p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
+                  <Icon className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{label}</p>
+                  <p className="text-sm font-medium capitalize">{value || 'unknown'}</p>
+                </div>
               </div>
             ))}
           </div>
-        </CardContent>
-      </Card>
+        )}
+      </PageSection>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tech Stack</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {['Go 1.23', 'chi', 'GORM', 'PostgreSQL', 'SQLite', 'SSE', 'React 18', 'Vite', 'TailwindCSS', 'Groq / Llama 3.1'].map((t) => (
-              <Badge key={t} variant="secondary">{t}</Badge>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Live System Status</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-20 rounded-lg" />
-              ))}
-            </div>
-          ) : health ? (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {[
-                { label: 'API', value: health.status, ok: health.status === 'ok', icon: Activity },
-                { label: 'Database', value: health.database, ok: health.database === 'ok', icon: Database },
-                { label: 'Groq AI', value: health.groq, ok: health.groq === 'configured', icon: Cpu },
-                { label: 'Queue', value: `${health.queue_depth} buffered`, ok: true, icon: Radio },
-              ].map(({ label, value, ok, icon: Icon }) => (
-                <div key={label} className="rounded-lg border bg-muted/20 p-4">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Icon className="h-4 w-4 text-muted-foreground" />
-                    <p className="text-xs font-medium text-muted-foreground uppercase">{label}</p>
-                  </div>
-                  <p className={`text-sm font-medium capitalize ${ok ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {value}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Unable to reach API.</p>
-          )}
-        </CardContent>
-      </Card>
+      <footer className="pt-8 border-t border-border">
+        <LabsBranding />
+      </footer>
     </div>
   )
 }

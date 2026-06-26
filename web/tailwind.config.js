@@ -38,6 +38,14 @@ export default {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',
         },
+        status: {
+          queued: 'hsl(var(--status-queued))',
+          running: 'hsl(var(--status-running))',
+          completed: 'hsl(var(--status-completed))',
+          failed: 'hsl(var(--status-failed))',
+          scheduled: 'hsl(var(--status-scheduled))',
+          retrying: 'hsl(var(--status-retrying))',
+        },
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -47,6 +55,34 @@ export default {
       fontFamily: {
         sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
         mono: ['Geist Mono', 'JetBrains Mono', 'ui-monospace', 'monospace'],
+      },
+      spacing: {
+        18: '4.5rem',
+        22: '5.5rem',
+      },
+      keyframes: {
+        'fade-in': {
+          from: { opacity: '0' },
+          to: { opacity: '1' },
+        },
+        'slide-up': {
+          from: { opacity: '0', transform: 'translateY(8px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'counter-tick': {
+          '0%, 100%': { transform: 'scale(1)' },
+          '50%': { transform: 'scale(1.05)' },
+        },
+        'status-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.5' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.3s ease-out',
+        'slide-up': 'slide-up 0.3s ease-out',
+        'counter-tick': 'counter-tick 0.2s ease-out',
+        'status-pulse': 'status-pulse 2s ease-in-out infinite',
       },
     },
   },

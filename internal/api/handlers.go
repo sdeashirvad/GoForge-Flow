@@ -297,33 +297,79 @@ func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/seed
 func (h *Handler) SeedJobs(w http.ResponseWriter, r *http.Request) {
+	badCSV := "id,name,email,amount,currency,status,created_at\n" +
+		",invalid,,bad,,,\n" +
+		",invalid,,bad,,,\n" +
+		",invalid,,bad,,,\n" +
+		",invalid,,bad,,,\n" +
+		",invalid,,bad,,,\n" +
+		",invalid,,bad,,,\n"
+
+	errorLogs := `[2024-01-15 10:24:31] ERROR nil pointer dereference in handler ServeHTTP
+[2024-01-15 10:24:33] ERROR connection refused: dial tcp 10.0.0.5:5432
+[2024-01-15 10:24:33] FATAL panic: runtime error: index out of range`
+
+	now := time.Now()
 	seeds := []struct {
-		t       storage.JobType
-		payload any
+		t          storage.JobType
+		payload    any
+		priority   storage.JobPriority
+		maxRetries int
+		scheduled  *time.Time
 	}{
-		{storage.JobTypeCSV, map[string]any{"rows": 150, "source": "transactions_q4.csv"}},
-		{storage.JobTypeCSV, map[string]any{"rows": 320, "source": "users_export.csv"}},
-		{storage.JobTypeLogAnalysis, map[string]any{"source": "api-gateway", "log_content": "sample logs"}},
-		{storage.JobTypeLogAnalysis, map[string]any{"source": "worker-service", "log_content": "panic: nil pointer"}},
-		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://api.example.com/health"}},
-		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://payments.internal/ping"}},
+		{storage.JobTypeCSV, map[string]any{"rows": 50, "source": "transactions_q1.csv"}, storage.PriorityHigh, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 120, "source": "transactions_q2.csv"}, storage.PriorityNormal, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 200, "source": "transactions_q3.csv"}, storage.PriorityNormal, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 280, "source": "transactions_q4.csv"}, storage.PriorityLow, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 350, "source": "users_export.csv"}, storage.PriorityNormal, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 400, "source": "payments_batch.csv"}, storage.PriorityHigh, 3, nil},
+		{storage.JobTypeCSV, map[string]any{"content": badCSV, "source": "invalid_import.csv"}, storage.PriorityNormal, 5, nil},
+		{storage.JobTypeCSV, map[string]any{"content": badCSV, "source": "corrupt_data.csv"}, storage.PriorityHigh, 5, nil},
+		{storage.JobTypeLogAnalysis, map[string]any{"source": "api-gateway", "log_content": "[2024-01-15 10:23:41] INFO server started\n[2024-01-15 10:24:02] INFO GET /api/users 200"}, storage.PriorityNormal, 3, nil},
+		{storage.JobTypeLogAnalysis, map[string]any{"source": "auth-service", "log_content": "[2024-01-15 11:00:00] INFO health check ok"}, storage.PriorityLow, 3, nil},
+		{storage.JobTypeLogAnalysis, map[string]any{"source": "worker-service", "log_content": errorLogs}, storage.PriorityHigh, 3, nil},
+		{storage.JobTypeLogAnalysis, map[string]any{"source": "payment-processor", "log_content": errorLogs}, storage.PriorityNormal, 4, nil},
+		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://httpbin.org/status/200", "expected_status": 200}, storage.PriorityNormal, 3, nil},
+		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://httpbin.org/delay/1", "expected_status": 200}, storage.PriorityLow, 3, nil},
+		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://httpbin.org/status/500", "expected_status": 200}, storage.PriorityHigh, 5, nil},
+		{storage.JobTypeCSV, map[string]any{"rows": 80, "source": "scheduled_import.csv"}, storage.PriorityNormal, 3, ptrTime(now.Add(2 * time.Minute))},
+		{storage.JobTypeLogAnalysis, map[string]any{"source": "nightly-batch", "log_content": "[2024-01-15 00:00:00] INFO batch started"}, storage.PriorityLow, 3, ptrTime(now.Add(5 * time.Minute))},
+		{storage.JobTypeMonitoring, map[string]any{"endpoint": "https://httpbin.org/status/503", "expected_status": 200}, storage.PriorityNormal, 5, nil},
 	}
 
 	var created []storage.Job
 	for _, s := range seeds {
 		payloadBytes, _ := json.Marshal(s.payload)
+		maxRetries := s.maxRetries
+		if maxRetries == 0 {
+			maxRetries = 3
+		}
+		priority := s.priority
+		if priority == "" {
+			priority = storage.PriorityNormal
+		}
 		job := &storage.Job{
-			Type:       s.t,
-			Priority:   storage.PriorityNormal,
-			Payload:    string(payloadBytes),
-			MaxRetries: 3,
-			Status:     storage.StatusQueued,
+			Type:        s.t,
+			Priority:    priority,
+			Payload:     string(payloadBytes),
+			MaxRetries:  maxRetries,
+			ScheduledAt: s.scheduled,
+			Status:      storage.StatusQueued,
+		}
+		if s.scheduled != nil && s.scheduled.After(now) {
+			job.Status = storage.StatusScheduled
 		}
 		h.db.Create(job)
-		h.q.Enqueue(job)
+		if job.Status == storage.StatusQueued {
+			h.q.Enqueue(job)
+		}
 		created = append(created, *job)
 	}
 
 	h.hub.Broadcast("jobs_seeded", map[string]any{"count": len(created)})
 	writeJSON(w, http.StatusCreated, map[string]any{"created": len(created), "jobs": created})
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }

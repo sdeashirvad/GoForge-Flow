@@ -1,63 +1,28 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileSpreadsheet, ScrollText, Globe } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Panel } from '@/components/design-system/Panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent } from '@/components/ui/card'
 import { Alert } from '@/components/ui/alert'
 import { cn } from '@/lib/utils'
-
-const JOB_TYPES = [
-  {
-    value: 'csv_processing',
-    label: 'CSV Processing',
-    icon: FileSpreadsheet,
-    desc: 'Validate and process CSV rows concurrently (8 workers)',
-    defaultPayload: { rows: 200, source: 'transactions_q4.csv' },
-  },
-  {
-    value: 'log_analysis',
-    label: 'Log Analysis',
-    icon: ScrollText,
-    desc: 'Parse log content, detect error patterns, extract stack traces',
-    defaultPayload: {
-      source: 'api-gateway',
-      log_content: `[2024-01-15 10:23:41] INFO  server started on :8080
-[2024-01-15 10:24:02] INFO  GET /api/users 200 12ms
-[2024-01-15 10:24:15] WARN  database pool at 80% capacity (8/10)
-[2024-01-15 10:24:31] ERROR nil pointer dereference in handler ServeHTTP
-[2024-01-15 10:24:33] ERROR connection refused: dial tcp 10.0.0.5:5432
-[2024-01-15 10:24:33] FATAL panic: runtime error: index out of range`,
-    },
-  },
-  {
-    value: 'monitoring',
-    label: 'Endpoint Monitor',
-    icon: Globe,
-    desc: 'Real HTTP GET — checks status code, measures latency',
-    defaultPayload: {
-      endpoint: 'https://httpbin.org/status/200',
-      timeout_ms: 10000,
-      expected_status: 200,
-    },
-  },
-]
-
-const PRIORITY_OPTS = ['low', 'normal', 'high']
+import { WizardSteps, ICONS } from '@/components/jobs/JobWizard/WizardSteps'
+import { JOB_TYPES, WIZARD_STEPS, PRIORITY_OPTS } from '@/components/jobs/JobWizard/constants'
 
 export default function SubmitJob() {
   const navigate = useNavigate()
+  const [step, setStep] = useState(0)
+  const [label, setLabel] = useState('')
   const [type, setType] = useState('csv_processing')
   const [priority, setPriority] = useState('normal')
   const [maxRetries, setMaxRetries] = useState(3)
   const [scheduled, setScheduled] = useState('')
-  const [payloadText, setPayloadText] = useState(
-    JSON.stringify(JOB_TYPES[0].defaultPayload, null, 2)
-  )
+  const [payload, setPayload] = useState(JOB_TYPES[0].defaultPayload)
+  const [payloadText, setPayloadText] = useState(JSON.stringify(JOB_TYPES[0].defaultPayload, null, 2))
   const [payloadErr, setPayloadErr] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -65,9 +30,18 @@ export default function SubmitJob() {
   const selectType = (t) => {
     setType(t)
     const jt = JOB_TYPES.find((j) => j.value === t)
+    setPayload(jt.defaultPayload)
     setPayloadText(JSON.stringify(jt.defaultPayload, null, 2))
     setPayloadErr('')
   }
+
+  const syncPayload = useCallback((updates) => {
+    const next = { ...payload, ...updates }
+    if (label) next._label = label
+    setPayload(next)
+    setPayloadText(JSON.stringify(next, null, 2))
+    setPayloadErr('')
+  }, [payload, label])
 
   const checkJson = (text) => {
     try {
@@ -80,40 +54,66 @@ export default function SubmitJob() {
     }
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault()
+  const buildBody = () => {
+    const p = { ...JSON.parse(payloadText) }
+    if (label) p._label = label
+    return {
+      type,
+      priority,
+      max_retries: maxRetries,
+      payload: p,
+      ...(scheduled ? { scheduled_at: new Date(scheduled).toISOString() } : {}),
+    }
+  }
+
+  const handleSubmit = async () => {
     if (!checkJson(payloadText)) return
     setSubmitting(true)
     setError('')
     try {
-      const body = {
-        type,
-        priority,
-        max_retries: maxRetries,
-        payload: JSON.parse(payloadText),
-        ...(scheduled ? { scheduled_at: new Date(scheduled).toISOString() } : {}),
-      }
-      const job = await api.createJob(body)
+      const job = await api.createJob(buildBody())
+      toast.success('Job enqueued', { description: `Job ${job.id.slice(0, 8)} created` })
       navigate(`/jobs/${job.id}`)
     } catch (e) {
       setError(e.message)
+      toast.error('Failed to enqueue', { description: e.message })
       setSubmitting(false)
     }
   }
 
-  return (
-    <div className="max-w-2xl space-y-8">
-      <PageHeader
-        title="New Job"
-        description="Configure and enqueue a job into the worker pool."
-      />
+  const next = () => {
+    if (step === 5 && !checkJson(payloadText)) return
+    if (step < WIZARD_STEPS.length - 1) setStep(step + 1)
+    else handleSubmit()
+  }
 
-      <form onSubmit={handleSubmit} className="space-y-8">
-        <div className="space-y-3">
-          <Label>Job Type</Label>
+  const back = () => {
+    if (step > 0) setStep(step - 1)
+    else navigate('/')
+  }
+
+  const renderStep = () => {
+    switch (step) {
+      case 0:
+        return (
+          <div className="space-y-4">
+            <Label htmlFor="label">Job label (optional)</Label>
+            <Input
+              id="label"
+              placeholder="e.g. Q4 transaction import"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Stored in payload metadata for identification. Does not affect execution.
+            </p>
+          </div>
+        )
+      case 1:
+        return (
           <div className="grid gap-3 sm:grid-cols-3">
             {JOB_TYPES.map((jt) => {
-              const Icon = jt.icon
+              const Icon = ICONS[jt.value]
               const selected = type === jt.value
               return (
                 <button
@@ -121,100 +121,163 @@ export default function SubmitJob() {
                   type="button"
                   onClick={() => selectType(jt.value)}
                   className={cn(
-                    'text-left rounded-lg border p-4 transition-all',
+                    'text-left rounded-lg border p-4 transition-all min-h-[44px]',
                     selected
                       ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                      : 'border-border bg-card hover:border-muted-foreground/30 hover:bg-accent/30'
+                      : 'border-border bg-card hover:border-muted-foreground/30'
                   )}
                 >
                   <Icon className={cn('h-5 w-5 mb-2', selected ? 'text-primary' : 'text-muted-foreground')} />
-                  <p className="text-sm font-medium text-foreground">{jt.label}</p>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{jt.desc}</p>
+                  <p className="text-sm font-medium">{jt.label}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{jt.desc}</p>
                 </button>
               )
             })}
           </div>
-        </div>
-
-        {type === 'monitoring' && (
-          <Alert className="border-amber-500/30 bg-amber-500/5 text-amber-200">
-            Real HTTP request — invalid or unreachable hosts will fail with a genuine error.
-          </Alert>
-        )}
-
-        <div className="grid gap-6 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Priority</Label>
-            <div className="flex gap-2">
-              {PRIORITY_OPTS.map((p) => (
-                <button
-                  key={p}
-                  type="button"
-                  onClick={() => setPriority(p)}
-                  className={cn(
-                    'flex-1 h-10 rounded-md border text-sm font-medium capitalize transition-colors',
-                    priority === p
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background text-muted-foreground hover:bg-accent'
-                  )}
-                >
-                  {p}
-                </button>
-              ))}
+        )
+      case 2:
+        return (
+          <div className="flex gap-2">
+            {PRIORITY_OPTS.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPriority(p)}
+                className={cn(
+                  'flex-1 h-12 rounded-lg border text-sm font-medium capitalize transition-all min-h-[44px]',
+                  priority === p
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border hover:bg-accent'
+                )}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        )
+      case 3:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="schedule">Schedule (optional)</Label>
+              <Input
+                id="schedule"
+                type="datetime-local"
+                value={scheduled}
+                onChange={(e) => setScheduled(e.target.value)}
+              />
+            </div>
+            {type === 'monitoring' && (
+              <Alert>Real HTTP request — unreachable hosts will fail with genuine errors.</Alert>
+            )}
+          </div>
+        )
+      case 4:
+        return (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="max-retries">Max retries</Label>
+              <Input
+                id="max-retries"
+                type="number"
+                min="0"
+                max="10"
+                value={maxRetries}
+                onChange={(e) => setMaxRetries(+e.target.value)}
+              />
+            </div>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Failed jobs re-queue with exponential backoff: 2s, 4s, 8s… up to max retries.
+            </p>
+            {type === 'csv_processing' && (
+              <div className="space-y-2">
+                <Label>Row count</Label>
+                <Input
+                  type="number"
+                  value={payload.rows || 200}
+                  onChange={(e) => syncPayload({ rows: +e.target.value })}
+                />
+              </div>
+            )}
+            {type === 'monitoring' && (
+              <div className="space-y-2">
+                <Label>Endpoint URL</Label>
+                <Input
+                  value={payload.endpoint || ''}
+                  onChange={(e) => syncPayload({ endpoint: e.target.value })}
+                />
+              </div>
+            )}
+            <div className="space-y-2">
+              <Label>Payload (JSON)</Label>
+              <Textarea
+                rows={8}
+                value={payloadText}
+                onChange={(e) => { setPayloadText(e.target.value); checkJson(e.target.value) }}
+                className="font-mono text-sm"
+                spellCheck={false}
+              />
+              {payloadErr && <p className="text-xs text-destructive">{payloadErr}</p>}
             </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="max-retries">Max Retries</Label>
-            <Input
-              id="max-retries"
-              type="number"
-              min="0"
-              max="10"
-              value={maxRetries}
-              onChange={(e) => setMaxRetries(+e.target.value)}
-            />
+        )
+      case 5:
+        return (
+          <div className="space-y-4 text-sm">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div><span className="text-muted-foreground">Type:</span> {type}</div>
+              <div><span className="text-muted-foreground">Priority:</span> {priority}</div>
+              <div><span className="text-muted-foreground">Max retries:</span> {maxRetries}</div>
+              <div><span className="text-muted-foreground">Scheduled:</span> {scheduled || 'Immediate'}</div>
+              {label && <div className="sm:col-span-2"><span className="text-muted-foreground">Label:</span> {label}</div>}
+            </div>
+            <pre className="rounded-lg bg-muted/30 border p-4 font-mono text-xs overflow-x-auto">
+              {payloadText}
+            </pre>
           </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="schedule">
-            Schedule <span className="text-muted-foreground font-normal">(optional)</span>
-          </Label>
-          <Input
-            id="schedule"
-            type="datetime-local"
-            value={scheduled}
-            onChange={(e) => setScheduled(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="payload">Payload (JSON)</Label>
-            {payloadErr && <span className="text-xs text-destructive">Invalid JSON</span>}
+        )
+      case 6:
+        return (
+          <div className="text-center space-y-4 py-4">
+            <p className="text-muted-foreground">
+              Ready to enqueue this job into the worker pool.
+            </p>
+            {error && <Alert variant="destructive">{error}</Alert>}
           </div>
-          <Textarea
-            id="payload"
-            rows={10}
-            value={payloadText}
-            onChange={(e) => { setPayloadText(e.target.value); checkJson(e.target.value) }}
-            spellCheck={false}
-            className="font-mono text-sm min-h-[200px]"
-          />
-          {payloadErr && <p className="text-xs text-destructive">{payloadErr}</p>}
-        </div>
+        )
+      default:
+        return null
+    }
+  }
 
-        {error && <Alert variant="destructive">{error}</Alert>}
+  return (
+    <div className="max-w-2xl space-y-8">
+      <PageHeader
+        title="New Job"
+        description="Step-by-step wizard to configure and enqueue a workflow job."
+      />
 
-        <div className="flex flex-col-reverse sm:flex-row gap-3">
-          <Button type="button" variant="outline" onClick={() => navigate('/')} className="sm:w-auto w-full">
-            Cancel
-          </Button>
-          <Button type="submit" disabled={submitting || !!payloadErr} className="sm:flex-1 w-full">
-            {submitting ? 'Enqueueing…' : 'Enqueue Job'}
-          </Button>
-        </div>
-      </form>
+      <WizardSteps currentStep={step} />
+
+      <Panel title={WIZARD_STEPS[step].label}>
+        {renderStep()}
+      </Panel>
+
+      <div className="flex flex-col-reverse sm:flex-row gap-3">
+        <Button type="button" variant="outline" onClick={back} className="sm:w-auto w-full">
+          {step === 0 ? 'Cancel' : 'Back'}
+        </Button>
+        <Button
+          type="button"
+          onClick={next}
+          disabled={submitting || (step === 4 && !!payloadErr)}
+          className="sm:flex-1 w-full"
+        >
+          {step === WIZARD_STEPS.length - 1
+            ? (submitting ? 'Enqueueing…' : 'Enqueue Job')
+            : 'Continue'}
+        </Button>
+      </div>
     </div>
   )
 }
