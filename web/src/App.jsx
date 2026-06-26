@@ -1,10 +1,10 @@
-import React, { useState, useCallback } from 'react'
+import React from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
+import { SSEProvider, useConnectionStatus } from '@/contexts/SSEContext'
 import { AppShell } from '@/components/layout/AppShell'
-import { useSSE } from '@/hooks/useSSE'
 import Dashboard from '@/pages/Dashboard'
 import SubmitJob from '@/pages/SubmitJob'
 import JobDetails from '@/pages/JobDetails'
@@ -12,14 +12,7 @@ import About from '@/pages/About'
 import Architecture from '@/pages/Architecture'
 
 function AppRoutes() {
-  const [connectionStatus, setConnectionStatus] = useState('connecting')
-
-  const handleSSE = useCallback((event) => {
-    if (event.type === '_connected') setConnectionStatus('connected')
-    if (event.type === '_disconnected') setConnectionStatus('disconnected')
-  }, [])
-
-  useSSE(handleSSE)
+  const connectionStatus = useConnectionStatus()
 
   return (
     <Routes>
@@ -38,12 +31,14 @@ export default function App() {
   return (
     <BrowserRouter>
       <ThemeProvider>
-        <TooltipProvider>
-          <div className="min-h-screen bg-background">
-            <AppRoutes />
-            <Toaster position="bottom-right" richColors closeButton />
-          </div>
-        </TooltipProvider>
+        <SSEProvider>
+          <TooltipProvider>
+            <div className="min-h-screen bg-background">
+              <AppRoutes />
+              <Toaster position="bottom-right" richColors closeButton />
+            </div>
+          </TooltipProvider>
+        </SSEProvider>
       </ThemeProvider>
     </BrowserRouter>
   )
